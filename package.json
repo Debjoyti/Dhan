@@ -1,5 +1,5 @@
 {
-  "name": "farmsy",
+  "name": "farmy",
   "private": true,
   "workspaces": [
     "apps/*",
