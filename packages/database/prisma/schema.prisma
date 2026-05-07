@@ -1,0 +1,375 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// -----------------------------------------------------------------------------
+// ENUMS
+// -----------------------------------------------------------------------------
+
+enum Role {
+  USER
+  FARMER
+  CONSUMER
+  RESTAURANT
+  DELIVERY_PARTNER
+  WAREHOUSE_MANAGER
+  ADMIN
+  SUPPORT_TEAM
+  CORPORATE_BUYER
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PROCESSING
+  SHIPPED
+  OUT_FOR_DELIVERY
+  DELIVERED
+  CANCELLED
+  RETURNED
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+enum DeliveryStatus {
+  UNASSIGNED
+  ASSIGNED
+  PICKED_UP
+  IN_TRANSIT
+  DELIVERED
+  FAILED
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAUSED
+  CANCELLED
+  EXPIRED
+}
+
+enum ContractStatus {
+  DRAFT
+  PENDING_SIGNATURE
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum FarmVerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum NotificationType {
+  EMAIL
+  SMS
+  WHATSAPP
+  PUSH
+  IN_APP
+}
+
+// -----------------------------------------------------------------------------
+// USERS & ROLES
+// -----------------------------------------------------------------------------
+
+model User {
+  id           String   @id @default(uuid())
+  email        String?  @unique
+  phone        String?  @unique
+  passwordHash String?
+  firstName    String?
+  lastName     String?
+  role         Role     @default(USER)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  farms             Farm[]
+  orders            Order[]
+  deliveries        Delivery[]
+  reviewsGiven      Review[]       @relation("ReviewAuthor")
+  reviewsReceived   Review[]       @relation("ReviewTarget")
+  wallet            Wallet?
+  subscriptions     Subscription[]
+  notifications     Notification[]
+  auditLogs         AuditLog[]
+  contractsAsBuyer  Contract[]     @relation("BuyerContract")
+  contractsAsFarmer Contract[]     @relation("FarmerContract")
+  aiPredictions     AIPrediction[]
+}
+
+// -----------------------------------------------------------------------------
+// FARMS & PRODUCTS
+// -----------------------------------------------------------------------------
+
+model Farm {
+  id                 String                 @id @default(uuid())
+  ownerId            String
+  name               String
+  description        String?
+  locationLat        Float?
+  locationLng        Float?
+  address            String?
+  verificationStatus FarmVerificationStatus @default(PENDING)
+  kycDocuments       String[] // URLs to documents
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+
+  // Relations
+  owner     User       @relation(fields: [ownerId], references: [id])
+  products  Product[]
+  contracts Contract[]
+}
+
+model Category {
+  id          String  @id @default(uuid())
+  name        String  @unique
+  description String?
+  parentId    String?
+
+  parent        Category?  @relation("SubCategories", fields: [parentId], references: [id])
+  subCategories Category[] @relation("SubCategories")
+  products      Product[]
+}
+
+model Product {
+  id          String    @id @default(uuid())
+  farmId      String
+  categoryId  String
+  name        String
+  description String?
+  price       Float
+  unit        String // e.g., kg, ton, piece
+  inventory   Float
+  images      String[]
+  videos      String[]
+  isOrganic   Boolean   @default(false)
+  harvestDate DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Relations
+  farm       Farm        @relation(fields: [farmId], references: [id])
+  category   Category    @relation(fields: [categoryId], references: [id])
+  orderItems OrderItem[]
+  reviews    Review[]
+}
+
+// -----------------------------------------------------------------------------
+// ORDERS & PAYMENTS
+// -----------------------------------------------------------------------------
+
+model Order {
+  id              String      @id @default(uuid())
+  customerId      String
+  totalAmount     Float
+  status          OrderStatus @default(PENDING)
+  shippingAddress String
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  // Relations
+  customer   User        @relation(fields: [customerId], references: [id])
+  orderItems OrderItem[]
+  payment    Payment?
+  delivery   Delivery?
+}
+
+model OrderItem {
+  id        String @id @default(uuid())
+  orderId   String
+  productId String
+  quantity  Float
+  price     Float
+
+  order   Order   @relation(fields: [orderId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
+}
+
+model Payment {
+  id            String        @id @default(uuid())
+  orderId       String        @unique
+  amount        Float
+  currency      String        @default("INR")
+  status        PaymentStatus @default(PENDING)
+  paymentMethod String // e.g., UPI, Razorpay, COD, Wallet
+  transactionId String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  order Order @relation(fields: [orderId], references: [id])
+}
+
+// -----------------------------------------------------------------------------
+// LOGISTICS & WAREHOUSING
+// -----------------------------------------------------------------------------
+
+model Delivery {
+  id            String         @id @default(uuid())
+  orderId       String         @unique
+  partnerId     String?
+  status        DeliveryStatus @default(UNASSIGNED)
+  trackingUrl   String?
+  estimatedTime DateTime?
+  actualTime    DateTime?
+  routePoints   Json? // Array of lat/lng objects
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  order   Order @relation(fields: [orderId], references: [id])
+  partner User? @relation(fields: [partnerId], references: [id])
+}
+
+model Warehouse {
+  id          String   @id @default(uuid())
+  name        String
+  locationLat Float
+  locationLng Float
+  address     String
+  capacity    Float // In tons or standard units
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  inventory WarehouseInventory[]
+}
+
+model WarehouseInventory {
+  id          String   @id @default(uuid())
+  warehouseId String
+  productId   String
+  quantity    Float
+  updatedAt   DateTime @updatedAt
+
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id])
+}
+
+// -----------------------------------------------------------------------------
+// ENGAGEMENT & RETENTION
+// -----------------------------------------------------------------------------
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  type      NotificationType
+  title     String
+  message   String
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model Review {
+  id        String   @id @default(uuid())
+  authorId  String
+  targetId  String? // Can review a user (e.g., farmer)
+  productId String? // Or review a product
+  rating    Int // 1-5
+  comment   String?
+  createdAt DateTime @default(now())
+
+  author  User     @relation("ReviewAuthor", fields: [authorId], references: [id])
+  target  User?    @relation("ReviewTarget", fields: [targetId], references: [id])
+  product Product? @relation(fields: [productId], references: [id])
+}
+
+model Subscription {
+  id           String             @id @default(uuid())
+  userId       String
+  planId       String // Reference to an external plan or a Plan model
+  status       SubscriptionStatus @default(ACTIVE)
+  startDate    DateTime           @default(now())
+  endDate      DateTime?
+  nextDelivery DateTime?
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+// -----------------------------------------------------------------------------
+// FINTECH & B2B
+// -----------------------------------------------------------------------------
+
+model Wallet {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  balance   Float    @default(0.0)
+  currency  String   @default("INR")
+  updatedAt DateTime @updatedAt
+
+  user         User                @relation(fields: [userId], references: [id])
+  transactions WalletTransaction[]
+}
+
+model WalletTransaction {
+  id        String   @id @default(uuid())
+  walletId  String
+  amount    Float
+  type      String // CREDIT or DEBIT
+  reference String? // e.g., Order ID or Payout ID
+  createdAt DateTime @default(now())
+
+  wallet Wallet @relation(fields: [walletId], references: [id])
+}
+
+model Contract {
+  id        String         @id @default(uuid())
+  buyerId   String
+  farmerId  String
+  farmId    String
+  details   String // Contract terms, crops, quantity, price
+  status    ContractStatus @default(DRAFT)
+  startDate DateTime
+  endDate   DateTime
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  buyer  User @relation("BuyerContract", fields: [buyerId], references: [id])
+  farmer User @relation("FarmerContract", fields: [farmerId], references: [id])
+  farm   Farm @relation(fields: [farmId], references: [id])
+}
+
+// -----------------------------------------------------------------------------
+// SYSTEM & ANALYTICS
+// -----------------------------------------------------------------------------
+
+model Analytics {
+  id        String   @id @default(uuid())
+  metric    String
+  value     Float
+  dimension String? // e.g., region, category
+  timestamp DateTime @default(now())
+}
+
+model AIPrediction {
+  id         String   @id @default(uuid())
+  type       String // DEMAND, PRICE, CROP_SUGGESTION
+  targetId   String? // Could refer to a user, farm, or region
+  prediction Json
+  confidence Float
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [targetId], references: [id])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  action    String
+  entity    String
+  entityId  String
+  details   Json?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+}
